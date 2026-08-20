@@ -1,0 +1,16 @@
+# secrets — never commit real credentials
+.env
+
+# Airflow runtime output — regenerated every run, not source of truth
+logs/
+
+client_seed.csv
+
+# pipeline output — regenerated from source data, not source code itself
+data/bronze/
+data/silver/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
