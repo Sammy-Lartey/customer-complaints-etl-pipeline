@@ -180,8 +180,7 @@ def write_sql(df: pd.DataFrame, path: str):
 
 if __name__ == "__main__":
     df = generate_clients()
-    df.to_csv("client_seed.csv", index=False)
     write_sql(df, "sql/init/01_seed_client.sql")
     print(f"Generated {len(df)} clients.")
     print(f"  With phoneNumber2: {df['phoneNumber2'].notna().sum()}")
-    print("Wrote client_seed.csv and sql/init/01_seed_client.sql")
+    print("Wrote sql/init/01_seed_client.sql")
