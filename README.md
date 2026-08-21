@@ -1,6 +1,6 @@
 # Cus_Pipeline
 
-> A production-style customer support data pipeline built with **Python, Apache Airflow, PostgreSQL, Docker, and a Medallion Architecture**.
+> A customer support data pipeline that transforms raw customer support data into clean, analytics-ready datasets. Built in **Python**, orchestrated with **Apache Airflow**, containerized with **Docker**, and stored and modeled in **PostgreSQL** following a Medallion Architecture.
 
 Cus_Pipeline is a rebuild of the first data pipeline I worked on, redesigned using the data engineering practices and concepts I've learned since then.
 
