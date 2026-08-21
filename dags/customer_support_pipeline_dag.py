@@ -171,7 +171,6 @@ with DAG(
             task_id="refresh_matview",
             python_callable=_refresh_materialized_view_task,
         )
-        # no >> between these three -- leaving them unconnected inside the
-        # group is what makes them run in PARALLEL rather than sequentially
+        
 
     land_changed_sheets_to_bronze >> clean_bronze_to_silver >> resolve_ids_to_staging >> load_gold >> analytics
