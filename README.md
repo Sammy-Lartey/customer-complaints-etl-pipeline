@@ -98,7 +98,6 @@ Cus_Pipeline addresses these limitations through:
 - **Separation of pipeline stages**
 - **Containerized infrastructure**
 - **Airflow orchestration**
-- **Automated tests**
 
 ---
 
