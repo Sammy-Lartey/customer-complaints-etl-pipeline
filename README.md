@@ -14,61 +14,7 @@ Rather than reprocessing an entire dataset on every run, Cus_Pipeline detects ne
 
 Cus_Pipeline follows a **Medallion Architecture** consisting of Bronze, Silver, and Gold layers.
 
-```text
-                    ┌─────────────────────┐
-                    │      SOURCE         │
-                    │                     │
-                    │ Excel Workbooks     │
-                    │ Monthly Sheets      │
-                    │ Synthetic Data      │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │       BRONZE        │
-                    │                     │
-                    │ Raw Parquet Data    │
-                    │ SHA-256 Hashing     │
-                    │ Ingestion Logging   │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │       SILVER        │
-                    │                     │
-                    │ Cleaning            │
-                    │ Standardization     │
-                    │ Validation          │
-                    │ Data Quality Checks │
-                    │ Resolution Logic    │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │        GOLD         │
-                    │                     │
-                    │ Analytics-ready     │
-                    │ PostgreSQL Tables   │
-                    │ Views               │
-                    │ Materialized Views  │
-                    │ Indexes              │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │      Metabase       │
-                    │                     │
-                    │ BI / Reporting      │
-                    │ Read-only Access    │
-                    └─────────────────────┘
-
-                    ▲
-                    │
-            ┌───────┴────────┐
-            │ Apache Airflow │
-            │ Orchestration  │
-            └────────────────┘
-```
+![Pipeline Architecture](docs/images/Pipeline_Architecture.png)
 
 Apache Airflow orchestrates the pipeline, while Docker Compose provides a reproducible local development environment.
 
@@ -315,6 +261,8 @@ Separating these entities reduces unnecessary repetition of customer information
 
 # PostgreSQL Analytics Layer
 
+![Database Structure](docs/images/Database_Structure.png)
+
 PostgreSQL serves as the analytical storage layer for the Gold data.
 
 The repository contains SQL for:
@@ -426,56 +374,7 @@ Cus_Pipeline/
 
 # Pipeline Flow
 
-The pipeline can be summarized as:
-
-```text
-1. Generate / receive source data
-                │
-                ▼
-2. Read Excel workbook
-                │
-                ▼
-3. Process individual sheets
-                │
-                ▼
-4. Generate SHA-256 hash
-                │
-                ▼
-5. Check ingestion history
-                │
-                ├── Already processed & unchanged
-                │             │
-                │             └──► Skip
-                │
-                └── New / changed
-                              │
-                              ▼
-6. Write Bronze Parquet
-                              │
-                              ▼
-7. Clean and standardize
-                              │
-                              ▼
-8. Run data quality checks
-                              │
-                              ▼
-9. Process resolution data
-                              │
-                              ▼
-10. Write Silver Parquet
-                              │
-                              ▼
-11. Map customer identities
-                              │
-                              ▼
-12. Load Gold data
-                              │
-                              ▼
-13. Create / refresh analytical objects
-                              │
-                              ▼
-14. Consume through Metabase
-```
+![Pipeline Flow](docs/images/Pipeline_Flow.png)
 
 Airflow manages the execution and dependency order of these stages.
 
