@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-def check_silver_quality(df: pd.DataFrame, bronze_row_count: int, logger) -> None:
+def check_silver_quality(df, bronze_row_count, logger):
     row_drop_pct = (1 - len(df) / bronze_row_count) * 100 if bronze_row_count else 0
     if row_drop_pct > 20:
         logger.warning(
@@ -14,7 +14,7 @@ def check_silver_quality(df: pd.DataFrame, bronze_row_count: int, logger) -> Non
             logger.warning(f"Unexpected nulls in '{col}' after cleaning -- should always have a default value")
 
 
-def check_resolution_quality(customers_df: pd.DataFrame, complaints_df: pd.DataFrame, logger) -> None:
+def check_resolution_quality(customers_df, complaints_df, logger):
     dup_count = customers_df["customerId"].duplicated().sum()
     if dup_count > 0:
         logger.warning(f"{dup_count} duplicate customerId(s) found in resolved customers")
@@ -24,7 +24,7 @@ def check_resolution_quality(customers_df: pd.DataFrame, complaints_df: pd.DataF
         logger.warning(f"{orphan_count} complaint(s) reference a customerId with no matching customer")
 
 
-def check_gold_quality(customer_count: int, complaint_count: int, logger) -> None:
+def check_gold_quality(customer_count, complaint_count, logger):
     if customer_count == 0:
         logger.warning("gold.customers loaded with zero rows -- check upstream stages")
     if complaint_count == 0:
