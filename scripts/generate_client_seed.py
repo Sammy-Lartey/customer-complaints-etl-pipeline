@@ -62,7 +62,7 @@ INTERNATIONAL_FIRST_FEMALE = ["Sarah", "Emma", "Grace", "Linda", "Mei", "Fatimah
 INTERNATIONAL_SURNAMES = ["Smith", "Johnson", "Williams", "Chen", "Khan", "Garcia", "Müller", "Kim"]
 
 
-def generate_name(gender: str) -> str:
+def generate_name(gender):
     name_gender = gender if gender in ("Male", "Female") else random.choice(["Male", "Female"])
     if random.random() < 0.75:
         if name_gender == "Male":
@@ -80,12 +80,12 @@ def generate_name(gender: str) -> str:
     return f"{first} {surname}"
 
 
-def to_e164(raw: str) -> str:
+def to_e164(raw):
     digits = "".join(c for c in raw if c.isdigit())
     return "+233" + digits[1:] if digits.startswith("0") else "+233" + digits
 
 
-def fake_ghana_number(used: set) -> str:
+def fake_ghana_number(used):
     while True:
         n = f"+233{random.randint(20,59)}{random.randint(1000000,9999999)}"
         if n not in used:
@@ -93,7 +93,7 @@ def fake_ghana_number(used: set) -> str:
             return n
 
 
-def load_source_numbers() -> list[str]:
+def load_source_numbers():
     xl = pd.ExcelFile(SOURCE_EXCEL)
     numbers = set()
     for sheet in xl.sheet_names:
@@ -105,7 +105,7 @@ def load_source_numbers() -> list[str]:
     return sorted(numbers)
 
 
-def generate_profile_id(used: set) -> str:
+def generate_profile_id(used):
     while True:
         pid = f"{random.randint(0, 999999999):09d}"
         if pid not in used:
@@ -113,7 +113,7 @@ def generate_profile_id(used: set) -> str:
             return pid
 
 
-def generate_clients() -> pd.DataFrame:
+def generate_clients():
     source_numbers = load_source_numbers()
     overlap_sample = random.sample(source_numbers, k=int(len(source_numbers) * OVERLAP_FRACTION))
     overlap_e164 = [to_e164(n) for n in overlap_sample]
@@ -151,7 +151,7 @@ def generate_clients() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def write_sql(df: pd.DataFrame, path: str):
+def write_sql(df, path):
     lines = []
     for _, r in df.iterrows():
         phone2 = f"'{r['phoneNumber2']}'" if r["phoneNumber2"] else "NULL"
