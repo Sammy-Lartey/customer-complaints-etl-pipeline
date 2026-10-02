@@ -2,7 +2,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 
-def upsert_customers(engine: Engine) -> int:
+def upsert_customers(engine):
     # Customers have a real, stable identity (customerId, via the crosswalk
     # table) -- so this is a genuine upsert: new customers get inserted,
     # existing ones get their attributes refreshed if anything changed
@@ -31,7 +31,7 @@ def upsert_customers(engine: Engine) -> int:
         return result.rowcount
 
 
-def replace_complaints(engine: Engine) -> int:
+def replace_complaints(engine):
     # Complaints have no stable identity of their own in the source data
     # (no complaint ID exists anywhere upstream), and a customer can
     # legitimately file the same kind of complaint multiple times over
@@ -61,7 +61,7 @@ def replace_complaints(engine: Engine) -> int:
         return result.rowcount
 
 
-def run_gold_load(engine: Engine) -> tuple[int, int]:
+def run_gold_load(engine):
     customer_count = upsert_customers(engine)
     complaint_count = replace_complaints(engine)
     return customer_count, complaint_count
