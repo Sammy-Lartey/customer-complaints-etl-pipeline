@@ -12,7 +12,7 @@ COMPLAINT_COLUMNS = [
 ]
 
 
-def split_silver(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def split_silver(df):
     customer_cols = [c for c in CUSTOMER_COLUMNS if c in df.columns]
     complaint_cols = [c for c in COMPLAINT_COLUMNS if c in df.columns]
 
@@ -21,21 +21,20 @@ def split_silver(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     return customers_df, complaints_df
 
-def build_resolution_key(df: pd.DataFrame) -> pd.Series:
+def build_resolution_key(df):
     return df["profileId"].fillna("number:" + df["number"].astype(str))
 
 
-def drop_customers_without_identifiers(customers_df: pd.DataFrame) -> pd.DataFrame:
+def drop_customers_without_identifiers(customers_df):
     no_identifiers = customers_df["profileId"].isna() & customers_df["number"].isna()
     return customers_df[~no_identifiers]
 
 
-def filter_orphan_complaints(customers_df: pd.DataFrame, complaints_df: pd.DataFrame) -> pd.DataFrame:
+def filter_orphan_complaints(customers_df, complaints_df):
     return complaints_df[complaints_df["customerId"].isin(customers_df["customerId"])]
 
 
-def join_public_client(customers_df: pd.DataFrame, complaints_df: pd.DataFrame,
-                        engine: Engine) -> tuple[pd.DataFrame, pd.DataFrame]:
+def join_public_client(customers_df, complaints_df, engine):
     client_df = pd.read_sql(
         'SELECT "profileId", "phoneNumber", "phoneNumber2" FROM public.client',
         engine,
@@ -59,8 +58,7 @@ def join_public_client(customers_df: pd.DataFrame, complaints_df: pd.DataFrame,
     return customers_df, complaints_df
 
 
-def resolve_customer_ids(customers_df: pd.DataFrame, complaints_df: pd.DataFrame,
-                          engine: Engine) -> tuple[pd.DataFrame, pd.DataFrame]:
+def resolve_customer_ids(customers_df, complaints_df, engine):
     customers_df = customers_df.copy()
     complaints_df = complaints_df.copy()
 
@@ -105,7 +103,7 @@ def resolve_customer_ids(customers_df: pd.DataFrame, complaints_df: pd.DataFrame
     return customers_df, complaints_df
 
 
-def run_resolution(silver_path: str, engine: Engine) -> tuple[int, int]:
+def run_resolution(silver_path, engine):
     df = pd.read_parquet(silver_path)
 
     customers_df, complaints_df = split_silver(df)
