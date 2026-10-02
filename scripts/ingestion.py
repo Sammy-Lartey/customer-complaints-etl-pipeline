@@ -6,12 +6,12 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 
-def _hash_dataframe(df: pd.DataFrame) -> str:
+def _hash_dataframe(df):
     row_hashes = pd.util.hash_pandas_object(df, index=True).values
     return hashlib.sha256(row_hashes.tobytes()).hexdigest()
 
 
-def _get_last_known_hash(engine: Engine, sheet_name: str, source_file: str) -> str | None:
+def _get_last_known_hash(engine, sheet_name, source_file):
     query = text("""
         SELECT content_hash
         FROM staging.ingestion_log
@@ -24,8 +24,7 @@ def _get_last_known_hash(engine: Engine, sheet_name: str, source_file: str) -> s
     return result[0] if result else None
 
 
-def _log_ingestion(engine: Engine, sheet_name: str, source_file: str,
-                    content_hash: str, row_count: int, bronze_path: str) -> None:
+def _log_ingestion(engine, sheet_name, source_file, content_hash, row_count, bronze_path):
     query = text("""
         INSERT INTO staging.ingestion_log
             (sheet_name, source_file, content_hash, row_count, bronze_path)
@@ -43,8 +42,8 @@ def _log_ingestion(engine: Engine, sheet_name: str, source_file: str,
         })
 
 
-def land_changed_sheets(excel_path: str, bronze_dir: str,
-                         exclude_sheets: list[str], engine: Engine) -> list[str]:
+def land_changed_sheets(excel_path, bronze_dir,
+                         exclude_sheets, engine):
     if not os.path.exists(excel_path):
         raise FileNotFoundError(f"Source Excel file not found at {excel_path}")
 
