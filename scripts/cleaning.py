@@ -13,7 +13,7 @@ VALID_REGIONS = [
 ]
 
 
-def _to_lower_camel(col: str) -> str:
+def _to_lower_camel(col):
     parts = col.strip().split(" ")
     return parts[0].lower() + "".join(w.title() for w in parts[1:])
 
@@ -25,7 +25,7 @@ def _correct_region(region, threshold=80):
     return match if score >= threshold else "Unknown"
 
 
-def format_phone_numbers(series: pd.Series) -> pd.Series:
+def format_phone_numbers(series):
     digits = series.astype(str).str.replace(r"\D", "", regex=True)
     formatted = pd.Series(np.nan, index=series.index, dtype="object")
     formatted[digits.str.startswith("0") & (digits.str.len() == 10)] = (
@@ -38,7 +38,7 @@ def format_phone_numbers(series: pd.Series) -> pd.Series:
     return formatted
 
 
-def load_and_merge_bronze(bronze_dir: str) -> pd.DataFrame:
+def load_and_merge_bronze(bronze_dir):
     files = [f for f in os.listdir(bronze_dir) if f.endswith(".parquet")]
     frames = [pd.read_parquet(os.path.join(bronze_dir, f)) for f in files]
 
@@ -53,7 +53,7 @@ def load_and_merge_bronze(bronze_dir: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
+def clean_columns(df):
     df = df.copy()
 
     if "NAME" in df.columns:
@@ -103,7 +103,7 @@ def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def validate_and_calculate_tat(df: pd.DataFrame) -> pd.DataFrame:
+def validate_and_calculate_tat(df):
     df = df.copy()
     df["logDate"] = pd.to_datetime(df["logDate"], errors="coerce")
     df["resolutionDate"] = pd.to_datetime(df["resolutionDate"], errors="coerce")
@@ -131,7 +131,7 @@ def validate_and_calculate_tat(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def run_silver_transform(bronze_dir: str, silver_path: str) -> int:
+def run_silver_transform(bronze_dir, silver_path):
     df = load_and_merge_bronze(bronze_dir)
     df = clean_columns(df)
 
