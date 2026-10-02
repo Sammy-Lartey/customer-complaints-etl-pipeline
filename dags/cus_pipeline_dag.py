@@ -126,7 +126,7 @@ default_args = {
 }
 
 with DAG(
-    dag_id="customer_support_pipeline",
+    dag_id="cus_pipeline",
     description="Customer support complaints ETL -- bronze/silver/gold pipeline",
     default_args=default_args,
     start_date=datetime(2025, 1, 1),
