@@ -15,6 +15,17 @@ def test_build_resolution_key_prefers_profile_id():
     assert result.iloc[1] == "number:+233550000000"
 
 
+def test_build_resolution_key_missing_number_stays_null():
+    df = pd.DataFrame({
+        "profileId": [None, None],
+        "number": [None, "+233540000000"],
+    })
+    result = build_resolution_key(df)
+    assert pd.isna(result.iloc[0])
+    assert result.iloc[1] == "number:+233540000000"
+    assert "number:nan" not in result.astype(str).tolist()
+
+
 def test_drop_customers_without_identifiers():
     df = pd.DataFrame({
         "profileId": ["ABC123", None, None],

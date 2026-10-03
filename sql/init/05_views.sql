@@ -16,8 +16,9 @@ SELECT co."customerId", c."name", c."number", co."profileId",
        co."resolutionDate", co."turnaroundTime", co."location",
        co."region", co."updates", co."comment", co."reasonForReversalRequest",
        CASE
-           WHEN co."turnaroundTime" <= 24 THEN 'Within 1 day'
-           WHEN co."turnaroundTime" <= 72 THEN 'Within 3 days'
+           WHEN co."turnaroundTime" IS NULL THEN 'Unknown'
+           WHEN co."turnaroundTime" <= 1 THEN 'Within 1 day'
+           WHEN co."turnaroundTime" <= 3 THEN 'Within 3 days'
            ELSE 'Over 3 days'
        END AS "turnaroundCategory"
 FROM gold.complaints co

@@ -6,7 +6,7 @@ Cus_Pipeline is a rebuild of the first data pipeline I worked on, redesigned usi
 
 The original pipeline processed customer support data exported from Excel and prepared it for reporting and analysis. This version focuses on **incremental processing, idempotency, data quality, reproducibility, maintainability, and reliable orchestration**.
 
-Rather than reprocessing an entire dataset on every run, Cus_Pipeline detects new or changed source data, processes only what is necessary, and safely supports repeated pipeline runs.
+Rather than reprocessing an entire dataset on every run, Cus_Pipeline detects unchanged source sheets via hashing, skips those bronze landings, then rebuilds Silver and Gold from the current bronze snapshot. Complaints in Gold are fully refreshed; customers are upserted by stable identity.
 
 ---
 
@@ -59,17 +59,17 @@ The generated hash is compared against the pipeline's ingestion history to deter
 Source Sheet
      │
      ▼
-Calculate SHA-256
+Calculate content hash
      │
      ▼
 Compare with ingestion history
      │
-     ├── Unchanged ──► Skip
+     ├── Unchanged ──► Skip bronze write
      │
-     └── New/Changed ──► Process
+     └── New/Changed ──► Write bronze parquet
 ```
 
-This prevents unchanged source data from being repeatedly ingested and transformed.
+Unchanged sheets are not rewritten to bronze. When any sheet *does* change, Silver is rebuilt from **all** bronze parquet files, and Gold complaints are replaced from that snapshot. This is skip-unchanged-landing, not row-level incremental loading.
 
 ---
 
@@ -322,7 +322,7 @@ A dedicated read-only database role is provided for Metabase so that BI workload
 Cus_Pipeline/
 │
 ├── dags/
-│   └── customer_support_pipeline_dag.py
+│   └── cus_pipeline_dag.py
 │
 ├── data/
 │   ├── .gitkeep
@@ -412,6 +412,8 @@ Current test coverage includes:
 tests/
 ├── conftest.py
 ├── test_cleaning.py
+├── test_ingestion.py
+├── test_quality_checks.py
 └── test_resolution.py
 ```
 
@@ -434,7 +436,8 @@ Make sure the following are installed:
 - Docker
 - Docker Compose
 - Git
-- Python 3.12+ if running the pipeline logic or tests outside Docker
+- Python 3.11+ if running the pipeline logic or tests outside Docker
+  (the Airflow image in this repo is `apache/airflow:2.9.3-python3.11`)
 
 PostgreSQL and Airflow do not need to be installed directly when using the provided Docker environment.
 
@@ -493,7 +496,7 @@ docker compose logs -f
 Once the environment is running:
 
 1. Open the Airflow web interface.
-2. Locate the `customer_support_pipeline` DAG.
+2. Locate the `cus_pipeline` DAG.
 3. Trigger the DAG.
 4. Monitor task execution through the Airflow interface.
 5. Verify the resulting Gold tables and analytical objects in PostgreSQL.
@@ -568,13 +571,13 @@ Cus_Pipeline is designed around several principles used in reliable data platfor
 
 The pipeline is designed to safely handle repeated executions.
 
-### Incremental
+### Incremental landing
 
-Unchanged source sheets are identified through hashing and skipped rather than unnecessarily reprocessed.
+Unchanged source sheets are identified through hashing and skipped at bronze rather than rewritten.
 
-### Idempotent
+### Idempotent where the data allows it
 
-Pipeline reruns should not arbitrarily create duplicate downstream records or regenerate customer identities.
+Customer identities persist across runs. Complaints are fully replaced because the source has no stable complaint key.
 
 ### Observable
 
@@ -582,7 +585,7 @@ Ingestion activity is recorded so the pipeline can determine what source data ha
 
 ### Validated
 
-Data quality checks are performed during the transformation process.
+Data quality checks fail the DAG on hard invariants (null names/regions after cleaning, duplicate customer IDs, orphan complaints, empty gold loads). Larger-than-expected silver row drop is logged as a warning.
 
 ### Reproducible
 

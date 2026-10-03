@@ -22,7 +22,10 @@ def split_silver(df):
     return customers_df, complaints_df
 
 def build_resolution_key(df):
-    return df["profileId"].fillna("number:" + df["number"].astype(str))
+    keys = df["profileId"].copy()
+    fill_from_number = keys.isna() & df["number"].notna()
+    keys.loc[fill_from_number] = "number:" + df.loc[fill_from_number, "number"].astype(str)
+    return keys
 
 
 def drop_customers_without_identifiers(customers_df):

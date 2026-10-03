@@ -1,4 +1,5 @@
-import pandas as pd
+class QualityCheckError(Exception):
+    """Raised when a hard data-quality invariant is violated."""
 
 
 def check_silver_quality(df, bronze_row_count, logger):
@@ -11,21 +12,27 @@ def check_silver_quality(df, bronze_row_count, logger):
 
     for col in ("name", "region"):
         if col in df.columns and df[col].isna().any():
-            logger.warning(f"Unexpected nulls in '{col}' after cleaning -- should always have a default value")
+            raise QualityCheckError(
+                f"Unexpected nulls in '{col}' after cleaning -- should always have a default value"
+            )
 
 
 def check_resolution_quality(customers_df, complaints_df, logger):
-    dup_count = customers_df["customerId"].duplicated().sum()
+    dup_count = int(customers_df["customerId"].duplicated().sum())
     if dup_count > 0:
-        logger.warning(f"{dup_count} duplicate customerId(s) found in resolved customers")
+        raise QualityCheckError(
+            f"{dup_count} duplicate customerId(s) found in resolved customers"
+        )
 
-    orphan_count = (~complaints_df["customerId"].isin(customers_df["customerId"])).sum()
+    orphan_count = int((~complaints_df["customerId"].isin(customers_df["customerId"])).sum())
     if orphan_count > 0:
-        logger.warning(f"{orphan_count} complaint(s) reference a customerId with no matching customer")
+        raise QualityCheckError(
+            f"{orphan_count} complaint(s) reference a customerId with no matching customer"
+        )
 
 
 def check_gold_quality(customer_count, complaint_count, logger):
     if customer_count == 0:
-        logger.warning("gold.customers loaded with zero rows -- check upstream stages")
+        raise QualityCheckError("gold.customers loaded with zero rows -- check upstream stages")
     if complaint_count == 0:
-        logger.warning("gold.complaints loaded with zero rows -- check upstream stages")
+        raise QualityCheckError("gold.complaints loaded with zero rows -- check upstream stages")

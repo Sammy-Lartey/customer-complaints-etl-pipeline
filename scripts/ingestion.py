@@ -3,11 +3,31 @@ import os
 
 import pandas as pd
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
+
+
+PHONE_COLUMNS = {"NUMBER", "NUMBER2", "number", "number2"}
+
+
+def _stringify_excel_phone(value):
+    if pd.isna(value):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, (int,)):
+        return str(value)
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_phone_columns(df):
+    for col in df.columns:
+        if col in PHONE_COLUMNS:
+            df[col] = df[col].map(_stringify_excel_phone)
+    return df
 
 
 def _hash_dataframe(df):
-    row_hashes = pd.util.hash_pandas_object(df, index=True).values
+    row_hashes = pd.util.hash_pandas_object(df, index=False).values
     return hashlib.sha256(row_hashes.tobytes()).hexdigest()
 
 
@@ -57,7 +77,7 @@ def land_changed_sheets(excel_path, bronze_dir,
         if sheet_name in exclude_sheets:
             continue
 
-        df = workbook.parse(sheet_name)
+        df = _normalize_phone_columns(workbook.parse(sheet_name))
         if df.empty:
             continue
 
@@ -67,7 +87,6 @@ def land_changed_sheets(excel_path, bronze_dir,
         if current_hash == last_hash:
             continue
 
-        bronze_path = os.path.join(bronze_dir, f"{sheet_name}.parquet")
         for col in df.select_dtypes(include="object").columns:
             df[col] = df[col].apply(lambda x: str(x) if pd.notna(x) else None)
 

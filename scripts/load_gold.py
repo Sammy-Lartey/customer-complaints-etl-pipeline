@@ -1,8 +1,7 @@
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
 
 
-def upsert_customers(engine):
+def upsert_customers(conn):
     # Customers have a real, stable identity (customerId, via the crosswalk
     # table) -- so this is a genuine upsert: new customers get inserted,
     # existing ones get their attributes refreshed if anything changed
@@ -26,12 +25,11 @@ def upsert_customers(engine):
             "accountType"  = EXCLUDED."accountType",
             "branch"       = EXCLUDED."branch"
     """)
-    with engine.begin() as conn:
-        result = conn.execute(upsert_sql)
-        return result.rowcount
+    result = conn.execute(upsert_sql)
+    return result.rowcount
 
 
-def replace_complaints(engine):
+def replace_complaints(conn):
     # Complaints have no stable identity of their own in the source data
     # (no complaint ID exists anywhere upstream), and a customer can
     # legitimately file the same kind of complaint multiple times over
@@ -41,27 +39,27 @@ def replace_complaints(engine):
     # just a full refresh from that -- honest about what the data
     # actually supports, rather than inventing a synthetic complaint key
     # with no real meaning.
-    with engine.begin() as conn:
-        conn.execute(text("TRUNCATE gold.complaints"))
-        result = conn.execute(text("""
-            INSERT INTO gold.complaints
-                ("customerId", "profileId", "number", "number2", "location",
-                 "region", "logDate", "complaintSource", "natureOfComplaint",
-                 "subject", "detailsOfComplaint", "comment", "updates",
-                 "status", "turnaroundTime", "resolutionDate",
-                 "reasonForReversalRequest", "assign", "nameOfCcRep")
-            SELECT
-                "customerId", "profileId", "number", "number2", "location",
-                "region", "logDate", "complaintSource", "natureOfComplaint",
-                "subject", "detailsOfComplaint", "comment", "updates",
-                "status", "turnaroundTime", "resolutionDate",
-                "reasonForReversalRequest", "assign", "nameOfCcRep"
-            FROM staging.complaints
-        """))
-        return result.rowcount
+    conn.execute(text("TRUNCATE gold.complaints"))
+    result = conn.execute(text("""
+        INSERT INTO gold.complaints
+            ("customerId", "profileId", "number", "number2", "location",
+             "region", "logDate", "complaintSource", "natureOfComplaint",
+             "subject", "detailsOfComplaint", "comment", "updates",
+             "status", "turnaroundTime", "resolutionDate",
+             "reasonForReversalRequest", "assign", "nameOfCcRep")
+        SELECT
+            "customerId", "profileId", "number", "number2", "location",
+            "region", "logDate", "complaintSource", "natureOfComplaint",
+            "subject", "detailsOfComplaint", "comment", "updates",
+            "status", "turnaroundTime", "resolutionDate",
+            "reasonForReversalRequest", "assign", "nameOfCcRep"
+        FROM staging.complaints
+    """))
+    return result.rowcount
 
 
 def run_gold_load(engine):
-    customer_count = upsert_customers(engine)
-    complaint_count = replace_complaints(engine)
+    with engine.begin() as conn:
+        customer_count = upsert_customers(conn)
+        complaint_count = replace_complaints(conn)
     return customer_count, complaint_count

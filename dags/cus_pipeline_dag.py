@@ -15,7 +15,9 @@ from ingestion import land_changed_sheets
 SOURCE_EXCEL_PATH = os.environ.get(
     "SOURCE_EXCEL_PATH", "/opt/airflow/data/source/CUSTOMER_SUPPORT-2025.xlsx"
 )
-EXCLUDE_SHEETS = os.environ.get("EXCLUDE_SHEETS", "Unresolved").split(",")
+EXCLUDE_SHEETS = [
+    s.strip() for s in os.environ.get("EXCLUDE_SHEETS", "Unresolved").split(",") if s.strip()
+]
 BRONZE_DIR = "/opt/airflow/data/bronze"
 SILVER_PATH = "/opt/airflow/data/silver/customer_support_silver.parquet"
 
@@ -171,6 +173,7 @@ with DAG(
             task_id="refresh_matview",
             python_callable=_refresh_materialized_view_task,
         )
-        
+
+        create_indexes >> create_views >> refresh_matview
 
     land_changed_sheets_to_bronze >> clean_bronze_to_silver >> resolve_ids_to_staging >> load_gold >> analytics

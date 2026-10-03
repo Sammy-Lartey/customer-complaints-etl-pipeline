@@ -66,7 +66,8 @@ services:
           --firstname Sammy \
           --lastname Lartey \
           --role Admin \
-          --email admin@example.com
+          --email admin@example.com \
+        || echo "Admin user already exists -- skipping create"
 
   airflow-webserver:
     <<: *airflow-common

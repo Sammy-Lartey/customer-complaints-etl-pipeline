@@ -39,7 +39,9 @@ def format_phone_numbers(series):
 
 
 def load_and_merge_bronze(bronze_dir):
-    files = [f for f in os.listdir(bronze_dir) if f.endswith(".parquet")]
+    files = sorted(f for f in os.listdir(bronze_dir) if f.endswith(".parquet"))
+    if not files:
+        raise FileNotFoundError(f"No bronze parquet files found in {bronze_dir}")
     frames = [pd.read_parquet(os.path.join(bronze_dir, f)) for f in files]
 
     all_columns = set()
