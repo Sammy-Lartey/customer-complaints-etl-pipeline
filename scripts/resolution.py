@@ -37,6 +37,22 @@ def filter_orphan_complaints(customers_df, complaints_df):
     return complaints_df[complaints_df["customerId"].isin(customers_df["customerId"])]
 
 
+def split_rejected_complaints(complaints_df):
+    no_identifier = build_resolution_key(complaints_df).isna()
+    no_log_date = complaints_df["logDate"].isna()
+    rejected = no_identifier | no_log_date
+
+    reasons = pd.Series("", index=complaints_df.index)
+    reasons[no_identifier] = "no phone number"
+    reasons[no_log_date & ~no_identifier] = "missing logDate"
+    reasons[no_log_date & no_identifier] = "no phone number; missing logDate"
+
+    rejected_df = complaints_df[rejected].copy()
+    rejected_df["rejectReason"] = reasons[rejected]
+
+    return complaints_df[~rejected], rejected_df
+
+
 def join_public_client(customers_df, complaints_df, engine):
     client_df = pd.read_sql(
         'SELECT "profileId", "phoneNumber", "phoneNumber2" FROM public.client',
@@ -111,9 +127,11 @@ def run_resolution(silver_path, engine):
 
     customers_df, complaints_df = split_silver(df)
     customers_df, complaints_df = join_public_client(customers_df, complaints_df, engine)
+    complaints_df, rejected_df = split_rejected_complaints(complaints_df)
     customers_df, complaints_df = resolve_customer_ids(customers_df, complaints_df, engine)
 
     customers_df.to_sql("customers", engine, schema="staging", if_exists="replace", index=False)
     complaints_df.to_sql("complaints", engine, schema="staging", if_exists="replace", index=False)
+    rejected_df.to_sql("rejected_complaints", engine, schema="staging", if_exists="replace", index=False)
 
-    return len(customers_df), len(complaints_df)
+    return len(customers_df), len(complaints_df), len(rejected_df)

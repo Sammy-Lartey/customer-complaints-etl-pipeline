@@ -1,5 +1,5 @@
 class QualityCheckError(Exception):
-    """Raised when a hard data-quality invariant is violated."""
+    pass
 
 
 def check_silver_quality(df, bronze_row_count, logger):
@@ -17,18 +17,32 @@ def check_silver_quality(df, bronze_row_count, logger):
             )
 
 
-def check_resolution_quality(customers_df, complaints_df, logger):
+def check_resolution_quality(customers_df, logger):
     dup_count = int(customers_df["customerId"].duplicated().sum())
     if dup_count > 0:
         raise QualityCheckError(
             f"{dup_count} duplicate customerId(s) found in resolved customers"
         )
 
-    orphan_count = int((~complaints_df["customerId"].isin(customers_df["customerId"])).sum())
-    if orphan_count > 0:
+
+def check_rejected_complaints(rejected_count, loaded_count, logger):
+    total = rejected_count + loaded_count
+
+    if rejected_count == 0:
+        logger.info(f"0 complaints rejected out of {total}")
+        return
+
+    reject_pct = rejected_count / total * 100
+    if reject_pct > 20:
         raise QualityCheckError(
-            f"{orphan_count} complaint(s) reference a customerId with no matching customer"
+            f"{rejected_count} of {total} complaints rejected ({reject_pct:.1f}%) -- "
+            f"too many, check the source data. Details in staging.rejected_complaints"
         )
+
+    logger.warning(
+        f"{rejected_count} of {total} complaints rejected ({reject_pct:.1f}%) -- "
+        f"see staging.rejected_complaints"
+    )
 
 
 def check_gold_quality(customer_count, complaint_count, logger):

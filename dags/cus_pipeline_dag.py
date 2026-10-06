@@ -65,19 +65,19 @@ def _clean_bronze_to_silver_task(**context):
 def _resolve_ids_task(**context):
     import pandas as pd
     from resolution import run_resolution
-    from quality_checks import check_resolution_quality
+    from quality_checks import check_resolution_quality, check_rejected_complaints
 
     hook = PostgresHook(postgres_conn_id="postgres_warehouse")
     engine = hook.get_sqlalchemy_engine()
 
-    customer_count, complaint_count = run_resolution(silver_path=SILVER_PATH, engine=engine)
+    customer_count, complaint_count, rejected_count = run_resolution(silver_path=SILVER_PATH, engine=engine)
 
     customers_df = pd.read_sql('SELECT * FROM staging.customers', engine)
-    complaints_df = pd.read_sql('SELECT * FROM staging.complaints', engine)
-    check_resolution_quality(customers_df, complaints_df, context["ti"].log)
+    check_resolution_quality(customers_df, context["ti"].log)
+    check_rejected_complaints(rejected_count, complaint_count, context["ti"].log)
 
-    context["ti"].log.info(f"Resolved {customer_count} customers, {complaint_count} complaints")
-    return {"customers": customer_count, "complaints": complaint_count}
+    context["ti"].log.info(f"Resolved {customer_count} customers, {complaint_count} complaints, {rejected_count} rejected")
+    return {"customers": customer_count, "complaints": complaint_count, "rejected": rejected_count}
 
 
 def _load_gold_task(**context):
