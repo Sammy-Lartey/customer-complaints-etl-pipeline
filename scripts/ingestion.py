@@ -50,7 +50,8 @@ def _log_ingestion(engine, sheet_name, source_file, content_hash, row_count, bro
             (sheet_name, source_file, content_hash, row_count, bronze_path)
         VALUES
             (:sheet_name, :source_file, :content_hash, :row_count, :bronze_path)
-        ON CONFLICT (sheet_name, source_file, content_hash) DO NOTHING
+        ON CONFLICT (sheet_name, source_file, content_hash)
+        DO UPDATE SET processed_at = NOW()
     """)
     with engine.begin() as conn:
         conn.execute(query, {
@@ -71,7 +72,7 @@ def land_changed_sheets(excel_path, bronze_dir,
 
     workbook = pd.ExcelFile(excel_path)
     source_file = os.path.basename(excel_path)
-    changed_paths: list[str] = []
+    landed = []
 
     for sheet_name in workbook.sheet_names:
         if sheet_name in exclude_sheets:
@@ -93,7 +94,17 @@ def land_changed_sheets(excel_path, bronze_dir,
         bronze_path = os.path.join(bronze_dir, f"{sheet_name}.parquet")
         df.to_parquet(bronze_path, index=False)
 
-        _log_ingestion(engine, sheet_name, source_file, current_hash, len(df), bronze_path)
-        changed_paths.append(bronze_path)
+        landed.append({
+            "sheet_name": sheet_name,
+            "source_file": source_file,
+            "content_hash": current_hash,
+            "row_count": len(df),
+            "bronze_path": bronze_path,
+        })
 
-    return changed_paths
+    return landed
+
+
+def log_landed_sheets(engine, landed):
+    for item in landed:
+        _log_ingestion(engine, **item)

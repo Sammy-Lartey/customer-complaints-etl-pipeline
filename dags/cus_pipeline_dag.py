@@ -9,7 +9,7 @@ from airflow.exceptions import AirflowSkipException
 from airflow.utils.task_group import TaskGroup
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from ingestion import land_changed_sheets
+from ingestion import land_changed_sheets, log_landed_sheets
 
 
 SOURCE_EXCEL_PATH = os.environ.get(
@@ -26,25 +26,26 @@ def _land_changed_sheets_task(**context):
     hook = PostgresHook(postgres_conn_id="postgres_warehouse")
     engine = hook.get_sqlalchemy_engine()
 
-    changed_paths = land_changed_sheets(
+    landed = land_changed_sheets(
         excel_path=SOURCE_EXCEL_PATH,
         bronze_dir=BRONZE_DIR,
         exclude_sheets=EXCLUDE_SHEETS,
         engine=engine,
     )
 
-    if not changed_paths:
+    if not landed:
         context["ti"].log.info("No sheets changed since last run -- nothing to land.")
     else:
-        context["ti"].log.info(f"Landed {len(changed_paths)} changed sheet(s): {changed_paths}")
+        names = [s["sheet_name"] for s in landed]
+        context["ti"].log.info(f"Landed {len(landed)} changed sheet(s): {names}")
 
-    return changed_paths
+    return landed
 
 
 def _clean_bronze_to_silver_task(**context):
-    changed_paths = context["ti"].xcom_pull(task_ids="land_changed_sheets_to_bronze")
+    landed = context["ti"].xcom_pull(task_ids="land_changed_sheets_to_bronze")
 
-    if not changed_paths:
+    if not landed:
         raise AirflowSkipException("No new bronze data -- skipping silver transform.")
 
     import pandas as pd
@@ -91,6 +92,16 @@ def _load_gold_task(**context):
 
     context["ti"].log.info(f"Gold load complete: {customer_count} customers upserted, {complaint_count} complaints loaded")
     return {"customers": customer_count, "complaints": complaint_count}
+
+
+def _mark_ingested_task(**context):
+    landed = context["ti"].xcom_pull(task_ids="land_changed_sheets_to_bronze")
+
+    hook = PostgresHook(postgres_conn_id="postgres_warehouse")
+    engine = hook.get_sqlalchemy_engine()
+
+    log_landed_sheets(engine, landed)
+    context["ti"].log.info(f"Logged {len(landed)} sheet(s) as ingested")
 
 
 def _run_sql_file_task(sql_filename, **context):
@@ -158,6 +169,11 @@ with DAG(
         python_callable=_load_gold_task,
     )
 
+    mark_sheets_ingested = PythonOperator(
+        task_id="mark_sheets_ingested",
+        python_callable=_mark_ingested_task,
+    )
+
     with TaskGroup(group_id="analytics") as analytics:
         create_indexes = PythonOperator(
             task_id="create_indexes",
@@ -176,4 +192,4 @@ with DAG(
 
         create_indexes >> create_views >> refresh_matview
 
-    land_changed_sheets_to_bronze >> clean_bronze_to_silver >> resolve_ids_to_staging >> load_gold >> analytics
+    land_changed_sheets_to_bronze >> clean_bronze_to_silver >> resolve_ids_to_staging >> load_gold >> mark_sheets_ingested >> analytics
