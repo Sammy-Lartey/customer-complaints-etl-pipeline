@@ -185,11 +185,16 @@ with DAG(
             python_callable=_run_sql_file_task,
             op_kwargs={"sql_filename": "04_views.sql"},
         )
+        create_matview = PythonOperator(
+            task_id="create_matview",
+            python_callable=_run_sql_file_task,
+            op_kwargs={"sql_filename": "05_materialized_view.sql"},
+        )
         refresh_matview = PythonOperator(
             task_id="refresh_matview",
             python_callable=_refresh_materialized_view_task,
         )
 
-        create_indexes >> create_views >> refresh_matview
+        create_indexes >> create_views >> create_matview >> refresh_matview
 
     land_changed_sheets_to_bronze >> clean_bronze_to_silver >> resolve_ids_to_staging >> load_gold >> mark_sheets_ingested >> analytics
