@@ -9,8 +9,15 @@ VALID_REGIONS = [
     "Ashanti Region", "Greater Accra Region", "Northern Region", "Volta Region",
     "Central Region", "Western Region", "Upper West Region", "Upper East Region",
     "Oti Region", "Savannah Region", "Bono East Region", "Western North Region",
-    "Brong Ahafo Region", "North East Region", "Ahafo Region", "Eastern Region",
+    "Bono Region", "North East Region", "Ahafo Region", "Eastern Region",
+    "Brong Ahafo Region",  # old name, split into Bono/Bono East/Ahafo in 2019 -- kept so old rows aren't lost
 ]
+
+# short forms that are only ever one region, which fuzzy matching can't tell apart
+# from a truly ambiguous input like "Upper"
+REGION_ALIASES = {
+    "Accra": "Greater Accra Region",
+}
 
 
 def _to_lower_camel(col):
@@ -18,11 +25,29 @@ def _to_lower_camel(col):
     return parts[0].lower() + "".join(w.title() for w in parts[1:])
 
 
-def _correct_region(region, threshold=80):
+def _correct_region(region, threshold=85, margin=5):
     if pd.isna(region) or str(region).strip() == "":
         return "Unknown"
-    match, score, _ = process.extractOne(region, VALID_REGIONS, scorer=fuzz.token_set_ratio)
-    return match if score >= threshold else "Unknown"
+
+    text = str(region).strip().title()
+    if text in VALID_REGIONS:
+        return text
+
+    short_name = text[:-len(" Region")] if text.endswith(" Region") else text
+    if short_name in REGION_ALIASES:
+        return REGION_ALIASES[short_name]
+
+    if not text.endswith("Region"):
+        text = text + " Region"
+
+    # token_set_ratio gave a perfect score to any name whose words were a subset
+    # of another's, so ties were settled by list order. ratio compares the whole
+    # string, and a close runner-up means we don't know -- better Unknown than a guess
+    top = process.extract(text, VALID_REGIONS, scorer=fuzz.ratio, limit=2)
+    best, best_score, _ = top[0]
+    if best_score < threshold or best_score - top[1][1] < margin:
+        return "Unknown"
+    return best
 
 
 def format_phone_numbers(series):

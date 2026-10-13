@@ -19,6 +19,50 @@ def test_correct_region_missing_value():
     assert _correct_region(None) == "Unknown"
 
 
+def test_correct_region_blank_string():
+    assert _correct_region("   ") == "Unknown"
+
+
+def test_correct_region_exact_name_is_not_remapped():
+    # used to come back as Brong Ahafo Region -- both scored 100 and list order broke the tie
+    assert _correct_region("Ahafo Region") == "Ahafo Region"
+
+
+def test_correct_region_missing_region_suffix():
+    assert _correct_region("Volta") == "Volta Region"
+
+
+def test_correct_region_typo():
+    assert _correct_region("Ashnti Region") == "Ashanti Region"
+
+
+def test_correct_region_ambiguous_returns_unknown():
+    # could be Upper West or Upper East -- better Unknown than a guess
+    assert _correct_region("Upper") == "Unknown"
+
+
+def test_correct_region_generic_word_returns_unknown():
+    # used to come back as Ashanti Region
+    assert _correct_region("Region") == "Unknown"
+
+
+def test_correct_region_bono():
+    # used to land on Bono East Region
+    assert _correct_region("Bono") == "Bono Region"
+
+
+def test_correct_region_old_brong_ahafo_name_is_kept():
+    assert _correct_region("Brong Ahafo Region") == "Brong Ahafo Region"
+
+
+def test_correct_region_alias():
+    assert _correct_region("Accra") == "Greater Accra Region"
+
+
+def test_correct_region_branch_name_is_not_a_region():
+    assert _correct_region("Accra Main") == "Unknown"
+
+
 def test_to_lower_camel_multi_word():
     assert _to_lower_camel("NATURE OF COMPLAINT") == "natureOfComplaint"
 
