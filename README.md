@@ -1,714 +1,231 @@
 # Cus_Pipeline
 
-> A customer support data pipeline that transforms raw customer support data into clean, analytics-ready datasets. Built in **Python**, orchestrated with **Apache Airflow**, containerized with **Docker**, and stored and modeled in **PostgreSQL** following a Medallion Architecture.
+Customer support teams often export complaints from Excel. This project takes that kind of workbook, cleans it, and loads it into a database you can chart.
 
-Cus_Pipeline is a rebuild of the first data pipeline I worked on, redesigned using the data engineering practices and concepts I've learned since then.
+It is a rebuild of the first pipeline I worked on. The old version reprocessed everything, and running it twice could duplicate rows. This version skips spreadsheet tabs that have not changed, keeps the same customer IDs across runs, and stops if the data looks too broken to trust.
 
-The original pipeline processed customer support data exported from Excel and prepared it for reporting and analysis. This version focuses on **incremental processing, idempotency, data quality, reproducibility, maintainability, and reliable orchestration**.
+You run it on your own machine with Docker. The point is the design, not a live company deployment.
 
-Rather than reprocessing an entire dataset on every run, Cus_Pipeline detects unchanged source sheets via hashing, skips those bronze landings, then rebuilds Silver and Gold from the current bronze snapshot. Complaints in Gold are fully refreshed; customers are upserted by stable identity.
-
----
-
-## Architecture
-
-Cus_Pipeline follows a **Medallion Architecture** consisting of Bronze, Silver, and Gold layers.
-
-![Pipeline Architecture](docs/images/Pipeline_Architecture.png)
-
-Apache Airflow orchestrates the pipeline, while Docker Compose provides a reproducible local development environment.
+The folders still use the names `bronze`, `silver`, and `gold` because that is how the files and database are laid out. In plain terms they mean **raw copy**, **cleaned file**, and **reporting tables**.
 
 ---
 
-## Why This Rebuild?
+## The problem
 
-The original pipeline worked, but it had several limitations common in early-stage ETL workflows:
+The source is a monthly Excel file. Each tab is a month of complaints. Names, phone numbers, regions, and dates are inconsistent. There is no reliable complaint ID. A customer can file the same kind of complaint more than once, so the pipeline cannot treat two similar rows as “the same complaint.”
 
-- Full datasets could be reprocessed unnecessarily.
-- Re-running the pipeline could produce duplicate or inconsistent results.
-- Source changes were not explicitly tracked.
-- Ingestion and transformation responsibilities were tightly coupled.
-- Data quality handling was inconsistent.
-- Pipeline state was difficult to reason about.
-- The workflow had limited protection against repeated processing.
+A fake customer list stands in for the bank’s real customer system (the pipeline does not own that system). About 60% of phones in the spreadsheet overlap that list, the way a real extract only partly matches a CRM.
 
-Cus_Pipeline addresses these limitations through:
-
-- **Incremental ingestion**
-- **Idempotent processing**
-- **Source-data hashing**
-- **Ingestion logging**
-- **Medallion architecture**
-- **Data quality validation**
-- **Customer identity mapping**
-- **Separation of pipeline stages**
-- **Containerized infrastructure**
-- **Airflow orchestration**
+The Excel in this repo is generated and contains no real customer data.
 
 ---
 
-# Key Features
-
-## Incremental Ingestion
-
-Source Excel sheets are hashed using **SHA-256** during ingestion.
-
-The generated hash is compared against the pipeline's ingestion history to determine whether a sheet is new or has changed.
+## What happens when the pipeline runs
 
 ```text
-Source Sheet
-     │
-     ▼
-Calculate content hash
-     │
-     ▼
-Compare with ingestion history
-     │
-     ├── Unchanged ──► Skip bronze write
-     │
-     └── New/Changed ──► Write bronze parquet
+Excel file (one tab per month)
+        │
+        ▼
+Raw copies of each changed tab     data/bronze/
+        │
+        ▼
+One cleaned file                   data/silver/
+        │
+        ▼
+Working tables in Postgres         staging (match customers, set aside bad rows)
+        │
+        ▼
+Reporting tables in Postgres       gold.customers and gold.complaints
+        │
+        ▼
+Ready-made report queries  →  charts in Metabase
 ```
 
-Unchanged sheets are not rewritten to bronze. When any sheet *does* change, Silver is rebuilt from **all** bronze parquet files, and Gold complaints are replaced from that snapshot. This is skip-unchanged-landing, not row-level incremental loading.
+**1. Copy only what changed.**  
+Each tab is given a fingerprint of its contents. If the tab looks the same as last successful run, it is not copied again. The `Unresolved` tab is ignored.
+
+**2. Clean everything we have.**  
+If at least one tab *did* change, all of the raw copies are merged and cleaned into a single file: phone numbers, Ghana regions, dates, and how many days a complaint took to close. Unchanged tabs are not “incrementally merged” into the database row by row. The cleaned file is rebuilt from the full set of raw copies.
+
+**3. Split customers from complaints, then identify people.**  
+Customer details and complaint details are split apart. Phones are matched to the customer list. Each person gets a stable ID that the pipeline remembers. Next month, the same person keeps the same ID.
+
+**4. Load the reporting database.**  
+Known customers are inserted or updated. Complaint rows are wiped and loaded fresh from this run’s cleaned data. That is honest: the spreadsheet is a full current picture, not a stream of new events with IDs.
+
+**5. Remember the fingerprints last.**  
+Only after the reporting tables succeed does the pipeline record “this tab was processed.” If cleaning or loading fails, the next run tries those tabs again.
+
+**6. Refresh reports.**  
+Indexes and saved queries used for charts are created or refreshed.
+
+If nothing in the spreadsheet changed, steps 2–6 are skipped.
+
+The pipeline also refuses to finish when data looks wrong: a name or region missing after cleaning, too many complaints that cannot be loaded (more than 20%), duplicate customer IDs, or empty reporting tables. A large drop in row count from the raw copies to the cleaned file is logged as a warning but does not stop the run. Complaints with no phone and no customer match, or with no log date, are written to a side table (`staging.rejected_complaints`) instead of being deleted quietly.
+
+Cleaning that matches this spreadsheet:
+
+- Ghana region spellings. Ambiguous values such as `"Upper"` become `Unknown` rather than a guess
+- Excel phone numbers (including numbers that arrived as `540663527.0`) into `+233…`
+- Negative “days to close” when the log date and resolution date were swapped
 
 ---
 
-## Idempotent Processing
+## What you can query at the end
 
-The pipeline is designed to safely handle repeated runs.
+Two main tables:
 
-Running the same source data multiple times should not result in unnecessary duplicate processing or inconsistent downstream state.
+- **Customers** — one row per person the pipeline has identified. If their name or branch changes in a later file, the row is updated in place.
+- **Complaints** — one row per complaint that passed the checks. The numeric `id` on this table is only unique for that load. It is not a lasting complaint number from the source.
 
-This is particularly important when working with Airflow, where tasks can be retried and DAGs can be manually rerun.
+Saved queries on top of those tables (for charts):
 
-The pipeline therefore separates:
-
-- Source change detection
-- Ingestion
-- Cleaning and transformation
-- Resolution processing
-- Customer identity mapping
-- Database loading
-
----
-
-## Medallion Architecture
-
-### Bronze
-
-The Bronze layer contains landed source data with minimal transformation.
-
-Responsibilities include:
-
-- Reading source workbooks
-- Processing individual sheets
-- Calculating source hashes
-- Recording ingestion activity
-- Writing raw data to Parquet
-
-Bronze data is stored under:
-
-```text
-data/bronze/
-```
-
----
-
-### Silver
-
-The Silver layer contains cleaned, standardized, and validated data.
-
-Transformations include:
-
-- Column normalization
-- Data type standardization
-- Phone number normalization
-- Region correction
-- Date handling
-- Turnaround-time validation
-- Data cleaning
-- Resolution processing
-- Data quality checks
-
-Silver data is stored under:
-
-```text
-data/silver/
-```
-
----
-
-### Gold
-
-The Gold layer contains analytics-ready data loaded into PostgreSQL.
-
-Rather than storing Gold as another local file layer, Cus_Pipeline uses PostgreSQL as the final analytical storage layer.
-
-The Gold layer includes:
-
-- Customer data
-- Complaint data
-- Resolution information
-- Customer identity mappings
-- Analytical views
-- Materialized views
-- Supporting indexes
-
-This provides a relational interface for downstream reporting and BI workloads.
-
----
-
-# Data Quality
-
-Data quality is treated as a pipeline responsibility rather than something left entirely to downstream reporting users.
-
-Cus_Pipeline includes dedicated quality-check logic in:
-
-```text
-scripts/quality_checks.py
-```
-
-### Region Validation
-
-Known Ghanaian regions are validated and standardized.
-
-Fuzzy matching is used where appropriate to identify and correct inconsistent region values.
-
-### Phone Number Standardization
-
-Phone numbers are normalized into a consistent format, including conversion to Ghana's international format where applicable.
-
-### Turnaround Time Validation
-
-Complaint logging and resolution timestamps are validated to ensure that calculated turnaround times are meaningful.
-
-Where timestamps produce negative turnaround times, the pipeline evaluates whether the values have been reversed and corrects them when appropriate.
-
-Missing turnaround times are identified rather than silently discarded.
-
----
-
-# Customer Identity Management
-
-Cus_Pipeline separates source-system customer information from the internal customer identity used by the analytical pipeline.
-
-Customer records are matched against client reference data and assigned stable identifiers using **ULIDs**.
-
-The repository includes a dedicated identity mapping table and supporting SQL objects to maintain this relationship.
-
-This allows the pipeline to:
-
-- Maintain stable customer identities
-- Avoid unnecessary reassignment of identifiers
-- Separate source identifiers from analytical identifiers
-- Support repeatable pipeline runs
-
-Client seed data for the local development environment is generated using:
-
-```text
-scripts/generate_client_seed.py
-```
-
----
-
-# Resolution Processing
-
-Complaint resolution is handled as a dedicated stage of the pipeline through:
-
-```text
-scripts/resolution.py
-```
-
-This keeps resolution-related business logic separate from the core ingestion and cleaning processes.
-
-Resolution information ultimately becomes part of the analytics-ready customer support dataset.
-
----
-
-# Data Model
-
-Cus_Pipeline separates customer-level information from complaint-level information.
-
-### Customer
-
-Customer-level attributes include:
-
-- Customer identifier
-- Name
-- Gender
-- Date of birth
-- Account type
-- Branch
-- Profile identifier
-
-### Complaint
-
-Complaint-level information includes:
-
-- Complaint identifier
-- Customer identifier
-- Complaint details
-- Complaint category
-- Logging date
-- Resolution date
-- Turnaround time
-- Resolution result
-- Other complaint attributes
-
-Separating these entities reduces unnecessary repetition of customer information across complaint records and provides a cleaner analytical model.
-
----
-
-# PostgreSQL Analytics Layer
-
-![Database Structure](docs/images/Database_Structure.png)
-
-PostgreSQL serves as the analytical storage layer for the Gold data.
-
-The repository contains SQL for:
-
-- Schema initialization
-- Gold table creation
-- Customer identity mapping
-- Index creation
-- Analytical views
-- Materialized views
-- Metabase read-only access
-
-```text
-sql/
-├── 03_indexes.sql
-├── 04_views.sql
-└── 05_materialized_view.sql
-
-sql/init/
-├── 00_init_schemas.sql
-├── 01_seed_client.sql
-├── 02_create_gold_tables.sql
-├── 03_create_identity_map.sql
-├── 04_indexes.sql
-├── 05_views.sql
-├── 06_materialized_view.sql
-└── 07_metabase_readonly_role.sql
-```
-
-A dedicated read-only database role is provided for Metabase so that BI workloads do not require write access to the analytical database.
-
----
-
-# Technology Stack
-
-| Technology | Purpose |
+| Query | What it answers |
 |---|---|
-| **Python** | Pipeline logic and data transformation |
-| **Pandas** | Data processing |
-| **SQLAlchemy** | PostgreSQL connectivity |
-| **PostgreSQL** | Gold / analytical storage |
-| **Apache Airflow** | Workflow orchestration |
-| **Docker** | Containerization |
-| **Docker Compose** | Local multi-service environment |
-| **Parquet** | Bronze and Silver storage |
-| **RapidFuzz** | Fuzzy matching and data standardization |
-| **ULID** | Stable internal identifiers |
-| **Metabase** | BI and reporting |
-| **Pytest** | Automated testing |
-| **Git** | Version control |
+| `gold.vw_monthly_trends` | How many complaints per month |
+| `gold.mv_monthly_complaint_summary` | Same idea, stored so it does not recompute every time |
+| `gold.vw_regional_stats` | Volume and resolution by region (`Unknown` left out) |
+| `gold.vw_complaint_status` | Mix of statuses |
+| `gold.vw_complaint_summary` | Each complaint plus a “closed in 1 day / 3 days / longer” bucket |
+| `gold.vw_customer_overview` | How often each customer has complained |
+
+Airflow (the job runner) has its own database. The reporting data lives in a **second** Postgres. That keeps Airflow’s internals away from the numbers you chart.
+
+The reporting database is created the first time Postgres starts (`sql/init/`). Chart queries and indexes are applied by the pipeline after a successful load (`sql/`).
 
 ---
 
-# Project Structure
+## Tools
 
-```text
-Cus_Pipeline/
-│
-├── dags/
-│   └── cus_pipeline_dag.py
-│
-├── data/
-│   ├── .gitkeep
-│   ├── source/
-│   │   └── .gitkeep
-│   ├── bronze/
-│   │   └── .gitkeep
-│   └── silver/
-│       └── .gitkeep
-│
-├── scripts/
-│   ├── cleaning.py
-│   ├── generate_client_seed.py
-│   ├── generate_synthetic_source.py
-│   ├── ingestion.py
-│   ├── load_gold.py
-│   ├── quality_checks.py
-│   └── resolution.py
-│
-├── sql/
-│   ├── 03_indexes.sql
-│   ├── 04_views.sql
-│   ├── 05_materialized_view.sql
-│   │
-│   └── init/
-│       ├── 00_init_schemas.sql
-│       ├── 01_seed_client.sql
-│       ├── 02_create_gold_tables.sql
-│       ├── 03_create_identity_map.sql
-│       ├── 04_indexes.sql
-│       ├── 05_views.sql
-│       ├── 06_materialized_view.sql
-│       └── 07_metabase_readonly_role.sql
-│
-├── tests/
-│   ├── conftest.py
-│   ├── test_cleaning.py
-│   └── test_resolution.py
-│
-├── .env.example
-├── .gitignore
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-└── README.md
-```
+**Python** does the data work. pandas reads each Excel tab, fingerprints it, cleans columns, and matches phones to the customer list. RapidFuzz scores region names when the spelling is off. python-ulid mints the customer IDs the pipeline stores. Intermediate copies are written as Parquet (a compact columnar file), not left as Excel.
+
+**Apache Airflow** is the job runner. The workflow is `cus_pipeline`: copy changed tabs → clean → match IDs → load reporting tables → record success → refresh chart queries. It is scheduled monthly, retries a failed step twice, and will not start a second run while one is still going. If no tab changed, later steps are marked skipped instead of running empty. Progress and logs are in the Airflow UI.
+
+**PostgreSQL** is two databases. One is only for Airflow (which jobs ran, which failed). The other is the reporting database: customers, complaints, the ID map, and the saved queries Metabase reads. Constraints (for example complaints must point at a known customer) live here, not in the spreadsheet.
+
+**Docker Compose** starts all of that together — Airflow, both Postgres instances, and Metabase — with the project folders mounted in so the job can see `data/`, `scripts/`, and `sql/`.
+
+**Metabase** is the charting UI. It connects to the reporting database as `metabase_reader`, a user that can read reporting tables and cannot write.
+
+**Pytest** runs the cleaning and matching rules on small example tables. You can check those rules without booting Docker or Airflow.
 
 ---
 
-# Pipeline Flow
+## How to run it
 
-![Pipeline Flow](docs/images/Pipeline_Flow.png)
+You need Docker, Docker Compose, Git, and Python 3.11+ on your computer for two short generator scripts.
 
-Airflow manages the execution and dependency order of these stages.
-
----
-
-# Synthetic Data
-
-The repository includes:
-
-```text
-scripts/generate_synthetic_source.py
-```
-
-which can be used to generate synthetic customer support source data for local development and testing.
-
-This allows the pipeline to be demonstrated without relying on proprietary production data.
-
-Client reference data can similarly be generated using:
-
-```text
-scripts/generate_client_seed.py
-```
-
-This makes the project reproducible as a standalone portfolio project.
-
----
-
-# Testing
-
-The project includes automated tests using **Pytest**.
-
-Current test coverage includes:
-
-```text
-tests/
-├── conftest.py
-├── test_cleaning.py
-├── test_ingestion.py
-├── test_quality_checks.py
-└── test_resolution.py
-```
-
-Tests cover important transformation and resolution logic independently of the full Airflow workflow.
-
-Run the test suite with:
-
-```bash
-pytest
-```
-
----
-
-# Running the Project
-
-## Prerequisites
-
-Make sure the following are installed:
-
-- Docker
-- Docker Compose
-- Git
-- Python 3.11+ if running the pipeline logic or tests outside Docker
-  (the Airflow image in this repo is `apache/airflow:2.9.3-python3.11`)
-
-PostgreSQL and Airflow do not need to be installed directly when using the provided Docker environment.
-
----
-
-## Clone the Repository
-
-```bash
-git clone <repository-url>
-
-cd Cus_Pipeline
-```
-
----
-
-## Configure Environment Variables
-
-Create a local `.env` file from the provided example:
+### 1. Create a local config file
 
 ```bash
 cp .env.example .env
 ```
 
-Populate the required values in `.env`.
+Fill in:
 
-**Do not commit `.env` to version control.**
+- `AIRFLOW_FERNET_KEY` — Airflow uses this to encrypt its own secrets. Generate one with:  
+  `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+- Database name, user, and password for the **reporting** database
+- A password for the Metabase read-only database user
 
-The `.env.example` file documents the configuration required to run the project without exposing actual credentials.
+Keep `.env` off git.
 
----
+The pipeline looks for `data/source/CUSTOMER_SUPPORT-2025.xlsx` and skips the `Unresolved` tab. Those paths are set in the Airflow job, not by Compose, unless you add them to the Airflow service yourself.
 
-## Start the Environment
+### 2. Create the fake Excel and customer list
 
-Build and start the containers:
+The spreadsheet is not stored in git.
+
+```bash
+pip install -r requirements.txt
+python scripts/generate_synthetic_source.py
+python scripts/generate_client_seed.py
+```
+
+Do this **before** the first `docker compose up`. The customer list is loaded only when the reporting database is first created. If you generate it after that, either start with a fresh database volume (this wipes reporting data) or insert the rows yourself.
+
+### 3. Start everything
 
 ```bash
 docker compose up -d --build
 ```
 
-Check the running services:
+| Open this | Address |
+|---|---|
+| Airflow (run the job) | http://localhost:8080 — user `admin`, password `admin` (local only) |
+| Metabase (charts) | http://localhost:3000 |
+| Reporting database | `localhost:5433` |
+
+### 4. Run the job
+
+1. In Airflow, open `cus_pipeline`, unpause it, click Trigger.
+2. Wait until `load_gold` and `analytics.refresh_matview` succeed.
+3. You should see rows in `gold.customers` and `gold.complaints`.
+
+Run it again with the same file: cleaning and loading should skip. Change a tab and run again: that tab is copied, the cleaned file and complaint table are rebuilt, and existing customer IDs should stay the same.
+
+---
+
+## Tests
 
 ```bash
-docker compose ps
+pytest
 ```
 
-View container logs:
-
-```bash
-docker compose logs -f
-```
+These check region matching, phone formatting, date repairs, “do not load this complaint” rules, and “empty reporting tables must fail.” They do not start Docker or Airflow.
 
 ---
 
-## Run the Pipeline
+## Charts in Metabase
 
-Once the environment is running:
+After a successful run, add a Postgres connection in Metabase:
 
-1. Open the Airflow web interface.
-2. Locate the `cus_pipeline` DAG.
-3. Trigger the DAG.
-4. Monitor task execution through the Airflow interface.
-5. Verify the resulting Gold tables and analytical objects in PostgreSQL.
-6. Connect to the data through Metabase using the configured read-only role.
+| | Metabase talking to Docker | You talking from your laptop |
+|---|---|---|
+| Host | `postgres-warehouse` | `localhost` |
+| Port | `5432` | `5433` |
+| Database | the name you set in `.env` | same |
+| User | `metabase_reader` | `metabase_reader` |
 
----
+That user can only **read** the reporting tables and saved queries listed above. It cannot change data, and it cannot see the side table of rejected complaints. To inspect rejects, connect as the main reporting database user.
 
-# Local Development
-
-The project separates application logic from infrastructure responsibilities.
-
-### Docker handles
-
-- Apache Airflow
-- PostgreSQL
-- Metabase
-- Supporting services
-
-### Python handles
-
-- Source ingestion
-- Data cleaning
-- Transformation
-- Data quality checks
-- Resolution processing
-- Customer identity management
-- Gold loading
-
-This allows pipeline logic to be developed and tested independently while keeping the infrastructure reproducible.
+If a saved query exists but Metabase cannot read it, grant read access on those queries to `metabase_reader` (they are created by the job after the database first starts).
 
 ---
 
-# Example Pipeline Results
+## Why it is built this way
 
-During development, the pipeline successfully demonstrated processing of a synthetic customer support dataset:
+**The spreadsheet is a full snapshot, not a list of new rows.** Each month you get the current book, not “only complaints since last time,” and a complaint has no lasting ID. So the pipeline fingerprints each tab and skips the copy step when the tab has not changed. If anything *did* change, it rebuilds the cleaned file from every raw copy it has, then reloads complaints as a whole. Updating complaints one-by-one would require a key the source does not give us. Customers are different: they have a stable ID, so they are inserted or updated in place.
+
+**Success is recorded after the reporting tables load, not after the copy.** The fingerprint log is written last. If cleaning or loading fails, the tab is still treated as unprocessed. The next run copies it again instead of skipping a load that never finished.
+
+**Customer IDs belong to this pipeline, not to Excel.** A generated ID is stored against “this CRM profile” or “this phone number.” Regenerating the fake spreadsheet, or getting a new export with the same people, should not mint a new ID for someone already seen.
+
+**Bad rows are kept, and too many of them fail the job.** A complaint with no way to identify the customer, or with no log date, goes to `staging.rejected_complaints` so you can see what was left out. If more than 20% of complaints land there, the job errors. Publishing a report that quietly dropped a fifth of the file is worse than a red run.
+
+**Python files on disk match the size of the data.** This sample is about a thousand rows. pandas, local Parquet, and Postgres are enough. A cluster or a data lake would not make the result more correct; it would only add moving parts.
+
+Drawings of the layout are in [`docs/architecture-diagrams.drawio`](docs/architecture-diagrams.drawio).
+
+---
+
+## What’s in the repo
 
 ```text
-Aligned all sheets to have 25 columns
-
-Merged DataFrame shape: (1035, 25)
-
-Cleaned data:
-1029 rows, 25 columns
-
-Invalid TATs:
-3 negative
-3 swapped
-11 missing
-
-Valid TATs:
-1024
-negative: 0
-swapped: 3
-missing: 5
-
-Customer records:
-951
-
-Complaint records:
-1029
+Cus_Pipeline/
+├── dags/cus_pipeline_dag.py      Airflow job (the step order)
+├── scripts/                      cleaning, matching, loading, fake-data generators
+├── sql/                          chart queries, run after each successful load
+│   └── init/                     database setup, only on first start
+├── tests/
+├── data/                         Excel and intermediate files (generated, not in git)
+├── docker-compose.yml            starts Airflow, databases, Metabase
+├── .env.example
+└── README.md
 ```
 
-These figures represent the development dataset and may change as the synthetic source data or pipeline logic evolves.
-
 ---
 
-# Reliability Considerations
-
-Cus_Pipeline is designed around several principles used in reliable data platforms.
-
-### Re-runnable
-
-The pipeline is designed to safely handle repeated executions.
-
-### Incremental landing
-
-Unchanged source sheets are identified through hashing and skipped at bronze rather than rewritten.
-
-### Idempotent where the data allows it
-
-Customer identities persist across runs. Complaints are fully replaced because the source has no stable complaint key.
-
-### Observable
-
-Ingestion activity is recorded so the pipeline can determine what source data has already been processed.
-
-### Validated
-
-Data quality checks fail the DAG on hard invariants (null names/regions after cleaning, duplicate customer IDs, orphan complaints, empty gold loads). Larger-than-expected silver row drop is logged as a warning.
-
-### Reproducible
-
-Docker Compose and synthetic source generation make the project reproducible without requiring access to production data.
-
-### Maintainable
-
-Ingestion, cleaning, quality checks, resolution processing, database loading, and orchestration are separated into distinct components.
-
----
-
-# Design Decisions
-
-## Why Parquet?
-
-Parquet is a columnar storage format well suited to analytical workloads and intermediate pipeline stages.
-
-It provides an efficient boundary between the source data and the structured PostgreSQL layer.
-
-## Why PostgreSQL?
-
-PostgreSQL provides reliable relational storage for the Gold layer and supports the analytical views, materialized views, indexes, and downstream BI workloads used by the project.
-
-## Why Airflow?
-
-The pipeline contains multiple dependent processing stages that benefit from explicit orchestration, scheduling, retries, and task-level observability.
-
-## Why Docker?
-
-Docker provides a consistent environment for running the pipeline's infrastructure without requiring each service to be installed and configured manually.
-
-## Why ULIDs?
-
-ULIDs provide stable, globally unique internal identifiers while keeping the analytical model independent from source-system identifiers.
-
-## Why Hash the Source Data?
-
-SHA-256 hashing allows the pipeline to detect whether an individual source sheet has changed.
-
-This enables incremental ingestion without relying solely on filenames or timestamps.
-
-## Why a Read-only Metabase Role?
-
-BI tools should not require write access to the analytical database.
-
-Cus_Pipeline therefore creates a dedicated read-only role for Metabase, providing a safer boundary between reporting workloads and the underlying data platform.
-
----
-
-# Data Security
-
-Sensitive configuration values should be supplied through environment variables.
-
-The following should **never** be committed to the repository:
-
-- Database passwords
-- API keys
-- Access tokens
-- Private credentials
-- Production connection strings
-- Other secrets
-
-Use `.env.example` to document required configuration without exposing actual credentials.
-
-The repository contains only synthetic development data and generated seed data.
-
----
-
-# Future Improvements
-
-Potential future iterations include:
-
-- Expanded unit and integration test coverage
-- CI/CD with GitHub Actions
-- Automated pipeline monitoring and alerting
-- More comprehensive data quality reporting
-- Data lineage
-- Cloud deployment
-- Object storage for Bronze data
-- Infrastructure as Code
-- Production-grade secret management
-- Additional analytical marts
-- More comprehensive observability and pipeline metrics
-
----
-
-# What This Project Demonstrates
-
-Cus_Pipeline demonstrates practical data engineering concepts beyond simply moving data from one system to another.
-
-It covers:
-
-- ETL pipeline design
-- Incremental data processing
-- Idempotent workflows
-- Source change detection
-- Data ingestion
-- Data cleaning
-- Data validation
-- Data quality engineering
-- Data modeling
-- Customer identity management
-- PostgreSQL analytical design
-- Workflow orchestration
-- Containerization
-- Automated testing
-- BI integration
-- Reproducible development environments
-
-The project is intentionally designed as a **production-style rebuild**, applying lessons learned from an earlier pipeline to create a more reliable, maintainable, and reproducible data platform.
-
----
-
-## License
-
-This project is intended for educational and portfolio purposes.
-
----
-
-## Author
+Educational / portfolio use.
 
 **Samuel Lartey**
-
----
-
-> **Cus_Pipeline** — turning messy customer support exports into reliable, analytics-ready data.
