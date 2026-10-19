@@ -7,6 +7,13 @@ from sqlalchemy import text
 
 PHONE_COLUMNS = {"NUMBER", "NUMBER2", "number", "number2"}
 
+# the columns the pipeline can't run without. anything else in a sheet is optional
+REQUIRED_COLUMNS = ["NAME", "NUMBER", "LOG DATE", "RESOLUTION DATE", "TAT"]
+
+
+class SourceSchemaError(Exception):
+    pass
+
 
 def _stringify_excel_phone(value):
     if pd.isna(value):
@@ -24,6 +31,34 @@ def _normalize_phone_columns(df):
         if col in PHONE_COLUMNS:
             df[col] = df[col].map(_stringify_excel_phone)
     return df
+
+
+def _clean_header(col):
+    return str(col).strip().upper()
+
+
+def find_missing_columns(columns):
+    present = {_clean_header(c) for c in columns}
+    return [c for c in REQUIRED_COLUMNS if c not in present]
+
+
+def check_source_columns(frames):
+    # looks at every sheet before anything is written, so one bad sheet
+    # stops the run instead of leaving the other sheets half landed
+    problems = []
+    for sheet_name, df in frames.items():
+        missing = find_missing_columns(df.columns)
+        if missing:
+            found = [str(c).strip() for c in df.columns]
+            problems.append(
+                f"Sheet '{sheet_name}' is missing required columns: {', '.join(missing)}. "
+                f"Columns found: {', '.join(found)}"
+            )
+    if problems:
+        raise SourceSchemaError(
+            "Source file doesn't match the expected layout, nothing was landed:\n"
+            + "\n".join(problems)
+        )
 
 
 def _hash_dataframe(df):
@@ -74,6 +109,7 @@ def land_changed_sheets(excel_path, bronze_dir,
     source_file = os.path.basename(excel_path)
     landed = []
 
+    frames = {}
     for sheet_name in workbook.sheet_names:
         if sheet_name in exclude_sheets:
             continue
@@ -82,6 +118,11 @@ def land_changed_sheets(excel_path, bronze_dir,
         if df.empty:
             continue
 
+        frames[sheet_name] = df
+
+    check_source_columns(frames)
+
+    for sheet_name, df in frames.items():
         current_hash = _hash_dataframe(df)
         last_hash = _get_last_known_hash(engine, sheet_name, source_file)
 
