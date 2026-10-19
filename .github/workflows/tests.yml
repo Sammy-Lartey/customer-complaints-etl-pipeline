@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # the tests don't import airflow, and it's slow to install outside
+      # its own image, so leave it out of the install
+      - name: Install dependencies
+        run: |
+          grep -v "apache-airflow" requirements.txt > ci-requirements.txt
+          pip install -r ci-requirements.txt
+
+      - name: Run tests
+        run: pytest
