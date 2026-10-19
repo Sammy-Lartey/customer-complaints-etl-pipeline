@@ -1,4 +1,5 @@
 # Cus_Pipeline
+[![tests](https://github.com/Sammy-Lartey/customer-complaints-etl-pipeline/actions/workflows/tests.yml/badge.svg)](https://github.com/Sammy-Lartey/customer-complaints-etl-pipeline/actions/workflows/tests.yml)
 
 Customer support teams often export complaints from Excel. This project takes that kind of workbook, cleans it, and loads it into a database you can chart.
 
