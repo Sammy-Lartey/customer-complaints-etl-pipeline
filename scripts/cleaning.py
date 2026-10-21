@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,14 @@ VALID_REGIONS = [
 REGION_ALIASES = {
     "Accra": "Greater Accra Region",
 }
+
+# words that follow a name in the assign column to say which team the person is on
+TEAM_WORDS = {"cx", "cc", "rep", "operations", "labs", "business", "support"}
+
+# the team stays part of the value for these, since the plain name could be any of their teams
+KEEP_TEAM = {"Gideon"}
+
+ASSIGNEE_ALIASES = {"Michale": "Michael"}
 
 
 def _to_lower_camel(col):
@@ -48,6 +57,25 @@ def _correct_region(region, threshold=85, margin=5):
     if best_score < threshold or best_score - top[1][1] < margin:
         return "Unknown"
     return best
+
+
+def _clean_assignee(value):
+    if pd.isna(value) or str(value).strip() == "":
+        return "Unassigned"
+
+    text = unicodedata.normalize("NFKD", str(value))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    words = text.replace("-", " ").split()
+
+    name = " ".join(w for w in words if w.lower() not in TEAM_WORDS).title()
+    team = " ".join(w for w in words if w.lower() in TEAM_WORDS).title()
+
+    if not name:
+        return "Unassigned"
+    name = ASSIGNEE_ALIASES.get(name, name)
+    if name in KEEP_TEAM and team:
+        return f"{name}-{team}"
+    return name
 
 
 def format_phone_numbers(series):
@@ -119,6 +147,9 @@ def clean_columns(df):
     if "region" in df.columns:
         df["region"] = df["region"].apply(_correct_region)
 
+    if "assign" in df.columns:
+        df["assign"] = df["assign"].apply(_clean_assignee)
+
     if "number" in df.columns:
         df["number"] = format_phone_numbers(df["number"])
 
@@ -162,7 +193,8 @@ def run_silver_transform(bronze_dir, silver_path):
     df = load_and_merge_bronze(bronze_dir)
     df = clean_columns(df)
 
-    meaningful_cols = [c for c in df.columns if c not in ("name", "region")]
+    # these three always get a filler value, so they can't count as real content in a row
+    meaningful_cols = [c for c in df.columns if c not in ("name", "region", "assign")]
     df = df[df[meaningful_cols].notna().any(axis=1)]
 
     df = validate_and_calculate_tat(df)

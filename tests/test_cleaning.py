@@ -1,5 +1,5 @@
 import pandas as pd
-from cleaning import _correct_region, _to_lower_camel, format_phone_numbers, validate_and_calculate_tat
+from cleaning import _clean_assignee, _correct_region, _to_lower_camel, clean_columns, format_phone_numbers, validate_and_calculate_tat
 
 
 def test_correct_region_exact_match():
@@ -61,6 +61,52 @@ def test_correct_region_alias():
 
 def test_correct_region_branch_name_is_not_a_region():
     assert _correct_region("Accra Main") == "Unknown"
+
+
+def test_clean_assignee_plain_name():
+    assert _clean_assignee("Amy") == "Amy"
+
+
+def test_clean_assignee_drops_team_suffix():
+    assert _clean_assignee("Amy- Cx") == "Amy"
+
+
+def test_clean_assignee_drops_team_without_dash():
+    assert _clean_assignee("Elizabeth Cc Rep") == "Elizabeth"
+
+
+def test_clean_assignee_strips_accents():
+    assert _clean_assignee("Saïd-Labs") == "Said"
+
+
+def test_clean_assignee_fixes_known_typo():
+    assert _clean_assignee("Michale") == "Michael"
+
+
+def test_clean_assignee_gideon_keeps_operations():
+    assert _clean_assignee("Gideon- Operations") == "Gideon-Operations"
+
+
+def test_clean_assignee_gideon_keeps_business_support():
+    assert _clean_assignee("Gideon-Business Support") == "Gideon-Business Support"
+
+
+def test_clean_assignee_plain_gideon_stays_plain():
+    assert _clean_assignee("Gideon") == "Gideon"
+
+
+def test_clean_assignee_missing_value():
+    assert _clean_assignee(None) == "Unassigned"
+
+
+def test_clean_assignee_blank_string():
+    assert _clean_assignee("   ") == "Unassigned"
+
+
+def test_clean_columns_cleans_assign():
+    df = pd.DataFrame({"ASSIGN": ["Amy- Cx", None]})
+    result = clean_columns(df)
+    assert list(result["assign"]) == ["Amy", "Unassigned"]
 
 
 def test_to_lower_camel_multi_word():
